@@ -1,0 +1,51 @@
+name: Catálogo de películas y series
+
+on:
+  schedule:
+    - cron: "17 10 * * *"   # diario, 10:17 UTC (4:17 am en Zapopan)
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: catalogo
+  cancel-in-progress: false
+
+jobs:
+  catalogo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Generar catálogo
+        run: python catalogo/generar_catalogo.py /tmp/catalogo.json
+
+      - name: Validar (mínimo 60 títulos)
+        run: |
+          python - <<'PY'
+          import json, sys
+          d = json.load(open("/tmp/catalogo.json", encoding="utf-8"))
+          n = len(d.get("titulos", {}))
+          print(f"{n} títulos, {len(d.get('secciones', []))} secciones")
+          if n < 60:
+              sys.exit("Catálogo demasiado chico: no se publica (se queda el de ayer).")
+          PY
+
+      - name: Publicar en la rama catalogo
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir /tmp/rama && cd /tmp/rama
+          git init -q -b catalogo
+          cp /tmp/catalogo.json .
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add catalogo.json
+          git commit -q -m "Catálogo $(date -u +%F)"
+          git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" catalogo
